@@ -7,23 +7,23 @@ import random
 st.set_page_config(page_title="WMS 3D - Central de Operações", layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------------------------------------
-# ESTILIZAÇÃO CSS CUSTOMIZADA (DARK THEME MODERN)
+# ESTILIZAÇÃO CSS CUSTOMIZADA (LIGHT THEME MODERN)
 # ---------------------------------------------------------
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; }
+    .stApp { background-color: #f3f4f6; color: #111827; }
     div[data-testid="stMetric"] {
-        background-color: #1a1f2c;
-        border: 1px solid #2e364f;
+        background-color: #ffffff;
+        border: 1px solid #e5e7eb;
         border-radius: 10px;
         padding: 12px 16px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 1. GERAÇÃO DO ESTOQUE (ENDEREÇAMENTO GABARITO EXCEL)
+# 1. GERAÇÃO DO ESTOQUE (PADRÃO DE ENDEREÇO: R-A-100-10)
 # ---------------------------------------------------------
 if "estoque" not in st.session_state:
     dados_iniciais = []
@@ -45,29 +45,30 @@ if "estoque" not in st.session_state:
         for idx, (pos_r, pos_l) in enumerate(lista_trat):
             col_idx = idx
             for nivel in niveis:
+                # Adicionado 'R-' no inicio do ID
                 dados_iniciais.append({
-                    "id": f"{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
+                    "id": f"R-{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
                     "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": "Tratativa",
-                    "status": "Vazio", "etiqueta": "", "nota_fiscal": ""
+                    "status": "Vazio", "etiqueta": "", "cte": ""
                 })
                 dados_iniciais.append({
-                    "id": f"{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
+                    "id": f"R-{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
                     "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": "Tratativa",
-                    "status": "Vazio", "etiqueta": "", "nota_fiscal": ""
+                    "status": "Vazio", "etiqueta": "", "cte": ""
                 })
         
         for idx, (pos_r, pos_l) in enumerate(lista_geral):
             col_idx = idx + offset_geral
             for nivel in niveis:
                 dados_iniciais.append({
-                    "id": f"{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
+                    "id": f"R-{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
                     "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": "Armazém",
-                    "status": "Vazio", "etiqueta": "", "nota_fiscal": ""
+                    "status": "Vazio", "etiqueta": "", "cte": ""
                 })
                 dados_iniciais.append({
-                    "id": f"{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
+                    "id": f"R-{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
                     "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": "Armazém",
-                    "status": "Vazio", "etiqueta": "", "nota_fiscal": ""
+                    "status": "Vazio", "etiqueta": "", "cte": ""
                 })
 
     montar_rua("C", racks_c_trat, racks_c_geral, z_pos=-8.0, offset_geral=4)
@@ -110,7 +111,7 @@ pos_selecionada = col_pos.selectbox("Posição", posicoes_disponiveis)
 
 nivel_selecionado = st.sidebar.selectbox("Nível", [10, 20, 30])
 
-id_alvo = f"{rua_selecionada}-{pos_selecionada}-{nivel_selecionado}"
+id_alvo = f"R-{rua_selecionada}-{pos_selecionada}-{nivel_selecionado}"
 idx_linha = df[df["id"] == id_alvo].index[0]
 linha_atual = df.loc[idx_linha]
 
@@ -121,11 +122,10 @@ if linha_atual["zona"] == "Tratativa":
 else:
     st.sidebar.success("✅ ARMAZÉM GERAL")
 
-# FORMULÁRIO DE INSERÇÃO MANUAL
 with st.sidebar.form("form_alocacao"):
     novo_status = st.radio("Status:", ["Vazio", "Ocupado"], index=0 if linha_atual["status"] == "Vazio" else 1)
     nova_etiqueta = st.text_input("Etiqueta Unitizadora:", value=linha_atual["etiqueta"], placeholder="Ex: PAL-1234")
-    nova_nf = st.text_input("Nota Fiscal:", value=linha_atual["nota_fiscal"], placeholder="Ex: 987654")
+    novo_cte = st.text_input("CTe:", value=linha_atual["cte"], placeholder="Ex: CTe-987654")
     
     salvar = st.form_submit_button("💾 Salvar Alteração", use_container_width=True)
     
@@ -133,35 +133,33 @@ with st.sidebar.form("form_alocacao"):
         st.session_state.estoque.at[idx_linha, "status"] = novo_status
         if novo_status == "Vazio":
             st.session_state.estoque.at[idx_linha, "etiqueta"] = ""
-            st.session_state.estoque.at[idx_linha, "nota_fiscal"] = ""
+            st.session_state.estoque.at[idx_linha, "cte"] = ""
         else:
             st.session_state.estoque.at[idx_linha, "etiqueta"] = nova_etiqueta
-            st.session_state.estoque.at[idx_linha, "nota_fiscal"] = nova_nf
+            st.session_state.estoque.at[idx_linha, "cte"] = novo_cte
         st.rerun()
 
 st.sidebar.divider()
 
-# BOTÕES MÁGICOS PARA A APRESENTAÇÃO AO GERENTE
 with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=True):
     st.markdown("<small>Use para demonstrar o sistema com dados visuais instantâneos.</small>", unsafe_allow_html=True)
     
     if st.button("🎲 Gerar Dados Fictícios", use_container_width=True):
         st.session_state.estoque["status"] = "Vazio"
         st.session_state.estoque["etiqueta"] = ""
-        st.session_state.estoque["nota_fiscal"] = ""
+        st.session_state.estoque["cte"] = ""
         
-        # Preenche ~25% do armazém aleatoriamente
         for idx in st.session_state.estoque.index:
             if random.random() < 0.25:
                 st.session_state.estoque.at[idx, "status"] = "Ocupado"
                 st.session_state.estoque.at[idx, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
-                st.session_state.estoque.at[idx, "nota_fiscal"] = f"NF-{random.randint(100000, 999999)}"
+                st.session_state.estoque.at[idx, "cte"] = f"CTe-{random.randint(100000, 999999)}"
         st.rerun()
 
     if st.button("🧹 Esvaziar Armazém", use_container_width=True):
         st.session_state.estoque["status"] = "Vazio"
         st.session_state.estoque["etiqueta"] = ""
-        st.session_state.estoque["nota_fiscal"] = ""
+        st.session_state.estoque["cte"] = ""
         st.rerun()
 
 # ---------------------------------------------------------
@@ -174,19 +172,23 @@ html_3d = f"""
 <html>
 <head>
     <style>
-        body {{ margin: 0; background: #0b0e14; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }}
-        #container3d {{ width: 100%; height: 580px; }}
+        body {{ margin: 0; background: #f3f4f6; color: #111827; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }}
+        #container3d {{ width: 100%; height: 580px; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }}
+        
         #tooltip {{
-            position: absolute; background: rgba(18, 24, 38, 0.94); border: 1px solid #3d4b68;
+            position: absolute; background: rgba(255, 255, 255, 0.95); border: 1px solid #e5e7eb;
             padding: 12px 16px; border-radius: 8px; display: none; pointer-events: none;
-            font-size: 13px; z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,0.6);
-            backdrop-filter: blur(8px);
+            font-size: 13px; z-index: 10; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            backdrop-filter: blur(8px); color: #1f2937;
         }}
+        
         #legend {{
-            position: absolute; bottom: 15px; left: 15px; background: rgba(15, 20, 31, 0.88);
-            border: 1px solid #2a3447; border-radius: 8px; padding: 10px 14px; font-size: 12px;
+            position: absolute; bottom: 15px; left: 15px; background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; font-size: 12px;
             display: flex; gap: 15px; align-items: center; backdrop-filter: blur(4px);
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); color: #374151; font-weight: 500;
         }}
+        
         .legend-item {{ display: flex; align-items: center; gap: 6px; }}
         .legend-color {{ width: 12px; height: 12px; border-radius: 3px; }}
     </style>
@@ -197,23 +199,23 @@ html_3d = f"""
     <div id="container3d"></div>
     <div id="tooltip"></div>
     <div id="legend">
-        <div class="legend-item"><div class="legend-color" style="background:#00ff88; box-shadow:0 0 8px #00ff88;"></div> Livre</div>
-        <div class="legend-item"><div class="legend-color" style="background:#ff9900;"></div> Ocupado Geral</div>
-        <div class="legend-item"><div class="legend-color" style="background:#ff2a55;"></div> Ocupado Tratativa</div>
-        <div class="legend-item"><div class="legend-color" style="background:#1e40af;"></div> Estrutura de Aço (Porta-Palete)</div>
+        <div class="legend-item"><div class="legend-color" style="background:#10b981; opacity:0.3; border:1px solid #10b981;"></div> Livre</div>
+        <div class="legend-item"><div class="legend-color" style="background:#f59e0b;"></div> Ocupado Geral</div>
+        <div class="legend-item"><div class="legend-color" style="background:#e11d48;"></div> Ocupado Tratativa</div>
+        <div class="legend-item"><div class="legend-color" style="background:#1e3a8a;"></div> Estrutura de Aço</div>
     </div>
 
     <script>
         const dados = {dados_json};
         
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0b0e14);
-        scene.fog = new THREE.FogExp2(0x0b0e14, 0.009);
+        scene.background = new THREE.Color(0xf3f4f6);
+        scene.fog = new THREE.FogExp2(0xf3f4f6, 0.008);
 
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / 580, 0.1, 1000);
         camera.position.set(15, 25, 42);
 
-        const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+        const renderer = new THREE.WebGLRenderer({{ antialias: true, alpha: false }});
         renderer.setSize(window.innerWidth, 580);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.shadowMap.enabled = true;
@@ -226,27 +228,44 @@ html_3d = f"""
         controls.target.set(15, 3, -3);
         controls.maxPolarAngle = Math.PI / 2 - 0.02;
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+        
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
         dirLight.position.set(35, 45, 25);
         dirLight.castShadow = true;
         dirLight.shadow.mapSize.width = 2048;
         dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.bias = -0.0005;
         scene.add(dirLight);
 
-        const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.35);
+        const fillLight = new THREE.DirectionalLight(0xe0e7ff, 0.4);
         fillLight.position.set(-30, 20, -20);
         scene.add(fillLight);
 
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#e5e7eb';
+        context.fillRect(0, 0, 128, 128);
+        context.fillStyle = '#d1d5db';
+        context.fillRect(0, 0, 64, 64);
+        context.fillRect(64, 64, 64, 64);
+        
+        const floorTexture = new THREE.CanvasTexture(canvas);
+        floorTexture.wrapS = THREE.RepeatWrapping;
+        floorTexture.wrapT = THREE.RepeatWrapping;
+        floorTexture.repeat.set(40, 25);
+
         const floorGeo = new THREE.PlaneGeometry(140, 90);
-        const floorMat = new THREE.MeshStandardMaterial({{ color: 0x111622, roughness: 0.7, metalness: 0.2 }});
+        const floorMat = new THREE.MeshStandardMaterial({{ map: floorTexture, roughness: 0.8, metalness: 0.05 }});
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
         floor.position.y = -0.05;
         floor.receiveShadow = true;
         scene.add(floor);
 
-        const grid = new THREE.GridHelper(140, 70, 0x2a354d, 0x182030);
+        const grid = new THREE.GridHelper(140, 70, 0x9ca3af, 0xe5e7eb);
         grid.position.y = -0.04;
         scene.add(grid);
 
@@ -255,9 +274,9 @@ html_3d = f"""
         const matLongarina = new THREE.MeshStandardMaterial({{ color: 0xd97706, metalness: 0.5, roughness: 0.4 }});
         const matPaleteMadeira = new THREE.MeshStandardMaterial({{ color: 0x854d0e, roughness: 0.85 }});
         const matOcupadoGeral = new THREE.MeshStandardMaterial({{ color: 0xf59e0b, roughness: 0.4, metalness: 0.1 }});
-        const matOcupadoTrat = new THREE.MeshStandardMaterial({{ color: 0xf43f5e, roughness: 0.3, metalness: 0.2, emissive: 0x4c0519 }});
-        const matVazioGeral = new THREE.MeshBasicMaterial({{ color: 0x10b981, wireframe: true, transparent: true, opacity: 0.12 }});
-        const matVazioTrat = new THREE.MeshBasicMaterial({{ color: 0xf43f5e, wireframe: true, transparent: true, opacity: 0.22 }});
+        const matOcupadoTrat = new THREE.MeshStandardMaterial({{ color: 0xe11d48, roughness: 0.3, metalness: 0.2 }});
+        const matVazioGeral = new THREE.MeshBasicMaterial({{ color: 0x10b981, wireframe: true, transparent: true, opacity: 0.2 }});
+        const matVazioTrat = new THREE.MeshBasicMaterial({{ color: 0xe11d48, wireframe: true, transparent: true, opacity: 0.3 }});
 
         const boxGeo = new THREE.BoxGeometry(1.05, 0.8, 1.1);
         const palletGeo = new THREE.BoxGeometry(1.15, 0.1, 1.18);
@@ -361,20 +380,20 @@ html_3d = f"""
                 tooltip.style.top = (event.clientY + 16) + 'px';
 
                 let tagZona = d.zona === 'Tratativa' 
-                    ? '<div style="color:#f43f5e; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">🚨 ZONA DE TRATATIVA</div>' 
-                    : '<div style="color:#10b981; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">📦 ARMAZÉM GERAL</div>';
+                    ? '<div style="color:#e11d48; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">🚨 ZONA DE TRATATIVA</div>' 
+                    : '<div style="color:#059669; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">📦 ARMAZÉM GERAL</div>';
 
                 let statusBadge = d.status === 'Ocupado'
-                    ? '<span style="background:#f59e0b; color:#000; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px;">OCUPADO</span>'
-                    : '<span style="background:#10b981; color:#000; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px;">DISPONÍVEL</span>';
+                    ? '<span style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px;">OCUPADO</span>'
+                    : '<span style="background:#d1fae5; color:#047857; border:1px solid #6ee7b7; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px;">DISPONÍVEL</span>';
 
                 tooltip.innerHTML = `
                     ${{tagZona}}
-                    <div style="font-size:15px; font-weight:bold; margin-bottom:6px;">Endereço: ${{d.id}}</div>
+                    <div style="font-size:15px; font-weight:bold; margin-bottom:6px; color:#111827;">Endereço: ${{d.id}}</div>
                     <div style="margin-bottom:4px;">Status: ${{statusBadge}}</div>
-                    <div style="color:#94a3b8; font-size:12px; margin-top:6px;">
-                        NF: <span style="color:#fff;">${{d.nota_fiscal || '---'}}</span><br/>
-                        Etiqueta: <span style="color:#fff;">${{d.etiqueta || '---'}}</span>
+                    <div style="color:#4b5563; font-size:12px; margin-top:6px; background:#f3f4f6; padding:6px; border-radius:4px;">
+                        CTe: <span style="color:#111827; font-weight:500;">${{d.cte || '---'}}</span><br/>
+                        Etiqueta: <span style="color:#111827; font-weight:500;">${{d.etiqueta || '---'}}</span>
                     </div>
                 `;
             }} else {{
@@ -415,4 +434,4 @@ if filtro_zona != "Todas":
 if df_exibir.empty:
     st.info("Nenhum palete alocado para o filtro selecionado.")
 else:
-    st.dataframe(df_exibir[["id", "rua", "pos_num", "nivel", "zona", "etiqueta", "nota_fiscal"]], use_container_width=True)
+    st.dataframe(df_exibir[["id", "rua", "pos_num", "nivel", "zona", "etiqueta", "cte"]], use_container_width=True)
