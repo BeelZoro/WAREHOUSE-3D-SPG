@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 import json
 import random
+import os
 
 st.set_page_config(page_title="WMS 3D - Central de Operações", layout="wide", initial_sidebar_state="expanded")
 
@@ -23,9 +24,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 1. GERAÇÃO DO ESTOQUE (PADRÃO DE ENDEREÇO: R-A-100-10)
+# 1. GERENCIAMENTO DE ESTADO COM PERSISTÊNCIA COMPARTILHADA
 # ---------------------------------------------------------
-if "estoque" not in st.session_state:
+ESTADO_ARQUIVO = "wms_estado.json"
+
+def carregar_estoque():
+    if os.path.exists(ESTADO_ARQUIVO):
+        try:
+            return pd.read_json(ESTADO_ARQUIVO, dtype={"cte": str})
+        except Exception:
+            pass
+    
+    # Se não houver arquivo salvo, gera a estrutura padrão vazia
     dados_iniciais = []
     niveis = [10, 20, 30]
     
@@ -74,7 +84,15 @@ if "estoque" not in st.session_state:
     montar_rua("B", racks_b_trat, racks_b_geral, z_pos=-0.7, offset_geral=5)
     montar_rua("A", racks_a_trat, racks_a_geral, z_pos=0.7, offset_geral=5)
 
-    st.session_state.estoque = pd.DataFrame(dados_iniciais)
+    df_init = pd.DataFrame(dados_iniciais)
+    df_init.to_json(ESTADO_ARQUIVO, orient="records", force_ascii=False)
+    return df_init
+
+def salvar_estoque(df):
+    df.to_json(ESTADO_ARQUIVO, orient="records", force_ascii=False)
+
+if "estoque" not in st.session_state:
+    st.session_state.estoque = carregar_estoque()
 
 df = st.session_state.estoque
 
@@ -133,7 +151,7 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
 
                 df_excel['clean_cte'] = df_excel['Numero_cte'].apply(clean_cte)
                 
-                # Agrupa os dados por Posição para somar volumes e unificar CTes e Remetentes
+                # Agrupa os dados por Posição
                 df_agrupado = df_excel.groupby('Posição').agg({
                     'clean_cte': lambda x: ', '.join(sorted(list(set([str(v) for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
                     'Remetente': lambda x: ', '.join(sorted(list(set([str(v).strip() for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
@@ -158,6 +176,7 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                         st.session_state.estoque.at[i, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
                         contador_atualizados += 1
                 
+                salvar_estoque(st.session_state.estoque)
                 st.session_state.arquivo_processado = arquivo_excel.name
                 st.success(f"Relatório importado com sucesso! {contador_atualizados} posições mapeadas.")
             except Exception as e:
@@ -205,6 +224,8 @@ with st.sidebar.form("form_alocacao"):
             st.session_state.estoque.at[idx_linha, "cte"] = novo_cte
             st.session_state.estoque.at[idx_linha, "remetente"] = novo_remetente
             st.session_state.estoque.at[idx_linha, "volumes"] = novos_volumes
+        
+        salvar_estoque(st.session_state.estoque)
         st.rerun()
 
 st.sidebar.divider()
@@ -224,6 +245,8 @@ with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=False
                 st.session_state.estoque.at[idx, "cte"] = f"{random.randint(100000, 999999)}"
                 st.session_state.estoque.at[idx, "remetente"] = "Cliente Fictício Ltda"
                 st.session_state.estoque.at[idx, "volumes"] = random.randint(1, 15)
+        
+        salvar_estoque(st.session_state.estoque)
         st.rerun()
 
     if st.button("🧹 Esvaziar Armazém", use_container_width=True):
@@ -232,6 +255,8 @@ with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=False
         st.session_state.estoque["cte"] = ""
         st.session_state.estoque["remetente"] = ""
         st.session_state.estoque["volumes"] = 0
+        
+        salvar_estoque(st.session_state.estoque)
         st.rerun()
 
 # ---------------------------------------------------------
