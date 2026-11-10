@@ -45,16 +45,15 @@ if "estoque" not in st.session_state:
         for idx, (pos_r, pos_l) in enumerate(lista_trat):
             col_idx = idx
             for nivel in niveis:
-                # Adicionado 'R-' no inicio do ID
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
                     "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": "Tratativa",
-                    "status": "Vazio", "etiqueta": "", "cte": ""
+                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": ""
                 })
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
                     "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": "Tratativa",
-                    "status": "Vazio", "etiqueta": "", "cte": ""
+                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": ""
                 })
         
         for idx, (pos_r, pos_l) in enumerate(lista_geral):
@@ -63,12 +62,12 @@ if "estoque" not in st.session_state:
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
                     "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": "Armazém",
-                    "status": "Vazio", "etiqueta": "", "cte": ""
+                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": ""
                 })
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
                     "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": "Armazém",
-                    "status": "Vazio", "etiqueta": "", "cte": ""
+                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": ""
                 })
 
     montar_rua("C", racks_c_trat, racks_c_geral, z_pos=-8.0, offset_geral=4)
@@ -98,11 +97,53 @@ m4.metric("Posições Livres", total_pos - ocupados_total)
 st.divider()
 
 # ---------------------------------------------------------
-# 3. PAINEL LATERAL (ALOCAÇÃO MANUAL + MOCK DATA)
+# 3. PAINEL LATERAL (IMPORTAÇÃO DE EXCEL & ALOCAÇÃO MANUAL)
 # ---------------------------------------------------------
-st.sidebar.title("📦 Alocação de Carga")
-st.sidebar.markdown("Use este painel para alocar paletes individualmente.")
+st.sidebar.title("📦 Integração & Alocação")
 
+# SEÇÃO DE IMPORTAÇÃO DE EXCEL
+with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
+    arquivo_excel = st.file_uploader("Envie a planilha (.xlsx)", type=["xlsx"])
+    
+    if arquivo_excel is not None:
+        try:
+            df_excel = pd.read_excel(arquivo_excel)
+            
+            # Limpa o estoque atual antes de aplicar o novo relatório
+            st.session_state.estoque["status"] = "Vazio"
+            st.session_state.estoque["etiqueta"] = ""
+            st.session_state.estoque["cte"] = ""
+            st.session_state.estoque["remetente"] = ""
+            
+            valid_ids = set(st.session_state.estoque["id"])
+            contador_atualizados = 0
+            
+            for _, row in df_excel.iterrows():
+                pos_excel = str(row.get("Posição", "")).strip()
+                # Ignora posições que não estão cadastradas no WMS
+                if pos_excel in valid_ids:
+                    cte_val = str(row.get("Numero_cte", ""))
+                    if cte_val == "nan": cte_val = ""
+                    
+                    rem_val = str(row.get("Remetente", ""))
+                    if rem_val == "nan": rem_val = ""
+                    
+                    idx_wms = st.session_state.estoque[st.session_state.estoque["id"] == pos_excel].index
+                    if len(idx_wms) > 0:
+                        i = idx_wms[0]
+                        st.session_state.estoque.at[i, "status"] = "Ocupado"
+                        st.session_state.estoque.at[i, "cte"] = cte_val
+                        st.session_state.estoque.at[i, "remetente"] = rem_val
+                        st.session_state.estoque.at[i, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
+                        contador_atualizados += 1
+            
+            st.success(f"Relatório importado com sucesso! {contador_atualizados} posições mapeadas.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao processar a planilha: {e}")
+
+st.sidebar.divider()
+st.sidebar.markdown("### Alocação Manual")
 col_rua, col_pos = st.sidebar.columns(2)
 rua_selecionada = col_rua.selectbox("Rua", ["A", "B", "C"])
 
@@ -126,6 +167,7 @@ with st.sidebar.form("form_alocacao"):
     novo_status = st.radio("Status:", ["Vazio", "Ocupado"], index=0 if linha_atual["status"] == "Vazio" else 1)
     nova_etiqueta = st.text_input("Etiqueta Unitizadora:", value=linha_atual["etiqueta"], placeholder="Ex: PAL-1234")
     novo_cte = st.text_input("CTe:", value=linha_atual["cte"], placeholder="Ex: CTe-987654")
+    novo_remetente = st.text_input("Remetente:", value=linha_atual["remetente"], placeholder="Nome do Cliente")
     
     salvar = st.form_submit_button("💾 Salvar Alteração", use_container_width=True)
     
@@ -134,32 +176,35 @@ with st.sidebar.form("form_alocacao"):
         if novo_status == "Vazio":
             st.session_state.estoque.at[idx_linha, "etiqueta"] = ""
             st.session_state.estoque.at[idx_linha, "cte"] = ""
+            st.session_state.estoque.at[idx_linha, "remetente"] = ""
         else:
             st.session_state.estoque.at[idx_linha, "etiqueta"] = nova_etiqueta
             st.session_state.estoque.at[idx_linha, "cte"] = novo_cte
+            st.session_state.estoque.at[idx_linha, "remetente"] = novo_remetente
         st.rerun()
 
 st.sidebar.divider()
 
-with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=True):
-    st.markdown("<small>Use para demonstrar o sistema com dados visuais instantâneos.</small>", unsafe_allow_html=True)
-    
+with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=False):
     if st.button("🎲 Gerar Dados Fictícios", use_container_width=True):
         st.session_state.estoque["status"] = "Vazio"
         st.session_state.estoque["etiqueta"] = ""
         st.session_state.estoque["cte"] = ""
+        st.session_state.estoque["remetente"] = ""
         
         for idx in st.session_state.estoque.index:
             if random.random() < 0.25:
                 st.session_state.estoque.at[idx, "status"] = "Ocupado"
                 st.session_state.estoque.at[idx, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
                 st.session_state.estoque.at[idx, "cte"] = f"CTe-{random.randint(100000, 999999)}"
+                st.session_state.estoque.at[idx, "remetente"] = "Cliente Fictício Ltda"
         st.rerun()
 
     if st.button("🧹 Esvaziar Armazém", use_container_width=True):
         st.session_state.estoque["status"] = "Vazio"
         st.session_state.estoque["etiqueta"] = ""
         st.session_state.estoque["cte"] = ""
+        st.session_state.estoque["remetente"] = ""
         st.rerun()
 
 # ---------------------------------------------------------
@@ -179,7 +224,7 @@ html_3d = f"""
             position: absolute; background: rgba(255, 255, 255, 0.95); border: 1px solid #e5e7eb;
             padding: 12px 16px; border-radius: 8px; display: none; pointer-events: none;
             font-size: 13px; z-index: 10; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-            backdrop-filter: blur(8px); color: #1f2937;
+            backdrop-filter: blur(8px); color: #1f2937; max-width: 280px;
         }}
         
         #legend {{
@@ -393,6 +438,7 @@ html_3d = f"""
                     <div style="margin-bottom:4px;">Status: ${{statusBadge}}</div>
                     <div style="color:#4b5563; font-size:12px; margin-top:6px; background:#f3f4f6; padding:6px; border-radius:4px;">
                         CTe: <span style="color:#111827; font-weight:500;">${{d.cte || '---'}}</span><br/>
+                        Remetente: <span style="color:#111827; font-weight:500;">${{d.remetente || '---'}}</span><br/>
                         Etiqueta: <span style="color:#111827; font-weight:500;">${{d.etiqueta || '---'}}</span>
                     </div>
                 `;
@@ -434,4 +480,4 @@ if filtro_zona != "Todas":
 if df_exibir.empty:
     st.info("Nenhum palete alocado para o filtro selecionado.")
 else:
-    st.dataframe(df_exibir[["id", "rua", "pos_num", "nivel", "zona", "etiqueta", "cte"]], use_container_width=True)
+    st.dataframe(df_exibir[["id", "rua", "pos_num", "nivel", "zona", "remetente", "cte", "etiqueta"]], use_container_width=True)
