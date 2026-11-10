@@ -105,43 +105,45 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
     arquivo_excel = st.file_uploader("Envie a planilha (.xlsx)", type=["xlsx"])
     
     if arquivo_excel is not None:
-        try:
-            df_excel = pd.read_excel(arquivo_excel)
-            
-            # Limpa o estoque atual
-            st.session_state.estoque["status"] = "Vazio"
-            st.session_state.estoque["etiqueta"] = ""
-            st.session_state.estoque["cte"] = ""
-            st.session_state.estoque["remetente"] = ""
-            st.session_state.estoque["volumes"] = 0
-            
-            valid_ids = set(st.session_state.estoque["id"])
-            
-            # Função para limpar formato de CTe numérico
-            def clean_cte(val):
-                if pd.isna(val): return ""
-                try:
-                    f = float(val)
-                    if f.is_integer(): return str(int(f))
-                except:
-                    pass
-                return str(val).strip()
+        if "arquivo_processado" not in st.session_state or st.session_state.arquivo_processado != arquivo_excel.name:
+            try:
+                colunas_necessarias = ["Posição", "Numero_cte", "Remetente", "Volumes"]
+                df_excel = pd.read_excel(arquivo_excel, usecols=lambda col: col in colunas_necessarias)
+                
+                # Limpa o estoque atual antes de preencher
+                st.session_state.estoque["status"] = "Vazio"
+                st.session_state.estoque["etiqueta"] = ""
+                st.session_state.estoque["cte"] = ""
+                st.session_state.estoque["remetente"] = ""
+                st.session_state.estoque["volumes"] = 0
+                
+                valid_ids = set(st.session_state.estoque["id"])
+                
+                # Filtra apenas as posições cadastradas no WMS
+                df_excel = df_excel[df_excel["Posição"].isin(valid_ids)].copy()
+                
+                def clean_cte(val):
+                    if pd.isna(val): return ""
+                    try:
+                        f = float(val)
+                        if f.is_integer(): return str(int(f))
+                    except:
+                        pass
+                    return str(val).strip()
 
-            df_excel['clean_cte'] = df_excel['Numero_cte'].apply(clean_cte)
-            
-            # Agrupa os dados por Posição para somar volumes e consolidar CTes e Remetentes
-            df_agrupado = df_excel.groupby('Posição').agg({
-                'clean_cte': lambda x: ', '.join(sorted(list(set([str(v) for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
-                'Remetente': lambda x: ', '.join(sorted(list(set([str(v).strip() for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
-                'Volumes': 'sum'
-            }).reset_index()
-            
-            contador_atualizados = 0
-            
-            for _, row in df_agrupado.iterrows():
-                pos_excel = str(row["Posição"]).strip()
-                # Considera apenas posições cadastradas no WMS
-                if pos_excel in valid_ids:
+                df_excel['clean_cte'] = df_excel['Numero_cte'].apply(clean_cte)
+                
+                # Agrupa os dados por Posição para somar volumes e unificar CTes e Remetentes
+                df_agrupado = df_excel.groupby('Posição').agg({
+                    'clean_cte': lambda x: ', '.join(sorted(list(set([str(v) for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
+                    'Remetente': lambda x: ', '.join(sorted(list(set([str(v).strip() for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
+                    'Volumes': 'sum'
+                }).reset_index()
+                
+                contador_atualizados = 0
+                
+                for _, row in df_agrupado.iterrows():
+                    pos_excel = str(row["Posição"]).strip()
                     cte_val = str(row["clean_cte"])
                     rem_val = str(row["Remetente"])
                     vol_val = int(row["Volumes"]) if pd.notna(row["Volumes"]) else 0
@@ -155,11 +157,11 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                         st.session_state.estoque.at[i, "volumes"] = vol_val
                         st.session_state.estoque.at[i, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
                         contador_atualizados += 1
-            
-            st.success(f"Relatório importado com sucesso! {contador_atualizados} posições mapeadas.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Erro ao processar a planilha: {e}")
+                
+                st.session_state.arquivo_processado = arquivo_excel.name
+                st.success(f"Relatório importado com sucesso! {contador_atualizados} posições mapeadas.")
+            except Exception as e:
+                st.error(f"Erro ao processar a planilha: {e}")
 
 st.sidebar.divider()
 st.sidebar.markdown("### Alocação Manual")
