@@ -48,12 +48,12 @@ if "estoque" not in st.session_state:
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
                     "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": "Tratativa",
-                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": ""
+                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": "", "volumes": 0
                 })
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
                     "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": "Tratativa",
-                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": ""
+                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": "", "volumes": 0
                 })
         
         for idx, (pos_r, pos_l) in enumerate(lista_geral):
@@ -62,12 +62,12 @@ if "estoque" not in st.session_state:
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
                     "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": "Armazém",
-                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": ""
+                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": "", "volumes": 0
                 })
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
                     "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": "Armazém",
-                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": ""
+                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": "", "volumes": 0
                 })
 
     montar_rua("C", racks_c_trat, racks_c_geral, z_pos=-8.0, offset_geral=4)
@@ -101,7 +101,6 @@ st.divider()
 # ---------------------------------------------------------
 st.sidebar.title("📦 Integração & Alocação")
 
-# SEÇÃO DE IMPORTAÇÃO DE EXCEL
 with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
     arquivo_excel = st.file_uploader("Envie a planilha (.xlsx)", type=["xlsx"])
     
@@ -109,24 +108,43 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
         try:
             df_excel = pd.read_excel(arquivo_excel)
             
-            # Limpa o estoque atual antes de aplicar o novo relatório
+            # Limpa o estoque atual
             st.session_state.estoque["status"] = "Vazio"
             st.session_state.estoque["etiqueta"] = ""
             st.session_state.estoque["cte"] = ""
             st.session_state.estoque["remetente"] = ""
+            st.session_state.estoque["volumes"] = 0
             
             valid_ids = set(st.session_state.estoque["id"])
+            
+            # Função para limpar formato de CTe numérico
+            def clean_cte(val):
+                if pd.isna(val): return ""
+                try:
+                    f = float(val)
+                    if f.is_integer(): return str(int(f))
+                except:
+                    pass
+                return str(val).strip()
+
+            df_excel['clean_cte'] = df_excel['Numero_cte'].apply(clean_cte)
+            
+            # Agrupa os dados por Posição para somar volumes e consolidar CTes e Remetentes
+            df_agrupado = df_excel.groupby('Posição').agg({
+                'clean_cte': lambda x: ', '.join(sorted(list(set([str(v) for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
+                'Remetente': lambda x: ', '.join(sorted(list(set([str(v).strip() for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
+                'Volumes': 'sum'
+            }).reset_index()
+            
             contador_atualizados = 0
             
-            for _, row in df_excel.iterrows():
-                pos_excel = str(row.get("Posição", "")).strip()
-                # Ignora posições que não estão cadastradas no WMS
+            for _, row in df_agrupado.iterrows():
+                pos_excel = str(row["Posição"]).strip()
+                # Considera apenas posições cadastradas no WMS
                 if pos_excel in valid_ids:
-                    cte_val = str(row.get("Numero_cte", ""))
-                    if cte_val == "nan": cte_val = ""
-                    
-                    rem_val = str(row.get("Remetente", ""))
-                    if rem_val == "nan": rem_val = ""
+                    cte_val = str(row["clean_cte"])
+                    rem_val = str(row["Remetente"])
+                    vol_val = int(row["Volumes"]) if pd.notna(row["Volumes"]) else 0
                     
                     idx_wms = st.session_state.estoque[st.session_state.estoque["id"] == pos_excel].index
                     if len(idx_wms) > 0:
@@ -134,6 +152,7 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                         st.session_state.estoque.at[i, "status"] = "Ocupado"
                         st.session_state.estoque.at[i, "cte"] = cte_val
                         st.session_state.estoque.at[i, "remetente"] = rem_val
+                        st.session_state.estoque.at[i, "volumes"] = vol_val
                         st.session_state.estoque.at[i, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
                         contador_atualizados += 1
             
@@ -166,8 +185,9 @@ else:
 with st.sidebar.form("form_alocacao"):
     novo_status = st.radio("Status:", ["Vazio", "Ocupado"], index=0 if linha_atual["status"] == "Vazio" else 1)
     nova_etiqueta = st.text_input("Etiqueta Unitizadora:", value=linha_atual["etiqueta"], placeholder="Ex: PAL-1234")
-    novo_cte = st.text_input("CTe:", value=linha_atual["cte"], placeholder="Ex: CTe-987654")
+    novo_cte = st.text_input("CTe:", value=linha_atual["cte"], placeholder="Ex: 987654")
     novo_remetente = st.text_input("Remetente:", value=linha_atual["remetente"], placeholder="Nome do Cliente")
+    novos_volumes = st.number_input("Volumes:", value=int(linha_atual["volumes"]), min_value=0, step=1)
     
     salvar = st.form_submit_button("💾 Salvar Alteração", use_container_width=True)
     
@@ -177,10 +197,12 @@ with st.sidebar.form("form_alocacao"):
             st.session_state.estoque.at[idx_linha, "etiqueta"] = ""
             st.session_state.estoque.at[idx_linha, "cte"] = ""
             st.session_state.estoque.at[idx_linha, "remetente"] = ""
+            st.session_state.estoque.at[idx_linha, "volumes"] = 0
         else:
             st.session_state.estoque.at[idx_linha, "etiqueta"] = nova_etiqueta
             st.session_state.estoque.at[idx_linha, "cte"] = novo_cte
             st.session_state.estoque.at[idx_linha, "remetente"] = novo_remetente
+            st.session_state.estoque.at[idx_linha, "volumes"] = novos_volumes
         st.rerun()
 
 st.sidebar.divider()
@@ -191,13 +213,15 @@ with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=False
         st.session_state.estoque["etiqueta"] = ""
         st.session_state.estoque["cte"] = ""
         st.session_state.estoque["remetente"] = ""
+        st.session_state.estoque["volumes"] = 0
         
         for idx in st.session_state.estoque.index:
             if random.random() < 0.25:
                 st.session_state.estoque.at[idx, "status"] = "Ocupado"
                 st.session_state.estoque.at[idx, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
-                st.session_state.estoque.at[idx, "cte"] = f"CTe-{random.randint(100000, 999999)}"
+                st.session_state.estoque.at[idx, "cte"] = f"{random.randint(100000, 999999)}"
                 st.session_state.estoque.at[idx, "remetente"] = "Cliente Fictício Ltda"
+                st.session_state.estoque.at[idx, "volumes"] = random.randint(1, 15)
         st.rerun()
 
     if st.button("🧹 Esvaziar Armazém", use_container_width=True):
@@ -205,6 +229,7 @@ with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=False
         st.session_state.estoque["etiqueta"] = ""
         st.session_state.estoque["cte"] = ""
         st.session_state.estoque["remetente"] = ""
+        st.session_state.estoque["volumes"] = 0
         st.rerun()
 
 # ---------------------------------------------------------
@@ -224,7 +249,7 @@ html_3d = f"""
             position: absolute; background: rgba(255, 255, 255, 0.95); border: 1px solid #e5e7eb;
             padding: 12px 16px; border-radius: 8px; display: none; pointer-events: none;
             font-size: 13px; z-index: 10; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-            backdrop-filter: blur(8px); color: #1f2937; max-width: 280px;
+            backdrop-filter: blur(8px); color: #1f2937; max-width: 300px;
         }}
         
         #legend {{
@@ -437,8 +462,9 @@ html_3d = f"""
                     <div style="font-size:15px; font-weight:bold; margin-bottom:6px; color:#111827;">Endereço: ${{d.id}}</div>
                     <div style="margin-bottom:4px;">Status: ${{statusBadge}}</div>
                     <div style="color:#4b5563; font-size:12px; margin-top:6px; background:#f3f4f6; padding:6px; border-radius:4px;">
-                        CTe: <span style="color:#111827; font-weight:500;">${{d.cte || '---'}}</span><br/>
-                        Remetente: <span style="color:#111827; font-weight:500;">${{d.remetente || '---'}}</span><br/>
+                        CTe(s): <span style="color:#111827; font-weight:500;">${{d.cte || '---'}}</span><br/>
+                        Remetente(s): <span style="color:#111827; font-weight:500;">${{d.remetente || '---'}}</span><br/>
+                        Total Volumes: <span style="color:#111827; font-weight:500;">${{d.volumes || 0}} un</span><br/>
                         Etiqueta: <span style="color:#111827; font-weight:500;">${{d.etiqueta || '---'}}</span>
                     </div>
                 `;
@@ -480,4 +506,4 @@ if filtro_zona != "Todas":
 if df_exibir.empty:
     st.info("Nenhum palete alocado para o filtro selecionado.")
 else:
-    st.dataframe(df_exibir[["id", "rua", "pos_num", "nivel", "zona", "remetente", "cte", "etiqueta"]], use_container_width=True)
+    st.dataframe(df_exibir[["id", "rua", "pos_num", "nivel", "zona", "remetente", "cte", "volumes", "etiqueta"]], use_container_width=True)
