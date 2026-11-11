@@ -24,14 +24,28 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 1. GERENCIAMENTO DE ESTADO COM PERSISTÊNCIA COMPARTILHADA
+# 1. GERENCIAMENTO DE ESTADO COM PERSISTÊNCIA E MIGRAÇÃO
 # ---------------------------------------------------------
 ESTADO_ARQUIVO = "wms_estado.json"
 
 def carregar_estoque():
     if os.path.exists(ESTADO_ARQUIVO):
         try:
-            return pd.read_json(ESTADO_ARQUIVO, dtype={"nf": str})
+            df = pd.read_json(ESTADO_ARQUIVO, dtype=False)
+            # Migração de compatibilidade se houver dados antigos com 'cte'
+            if "cte" in df.columns and "nf" not in df.columns:
+                df["nf"] = df["cte"]
+            
+            # Garante que todas as colunas obrigatórias existam
+            colunas_obrigatorias = {
+                "id": str, "rua": str, "pos_num": int, "nivel": int,
+                "col_idx": int, "side": str, "z_pos": float, "zona": str,
+                "status": str, "etiqueta": str, "nf": str, "remetente": str, "volumes": int
+            }
+            for col, dtype in colunas_obrigatorias.items():
+                if col not in df.columns:
+                    df[col] = "" if dtype == str else 0
+            return df
         except Exception:
             pass
     
@@ -68,7 +82,6 @@ def carregar_estoque():
         for idx, (pos_r, pos_l) in enumerate(lista_geral):
             col_idx = idx + offset_geral
             for nivel in niveis:
-                # Define setor Duracell (Nível 10, Rua A de 116 a 146, Rua B de 117 a 147)
                 zona = "Armazém"
                 if nivel == 10:
                     if nome_rua == "A" and 116 <= pos_r <= 146:
@@ -133,7 +146,6 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
     if arquivo_excel is not None:
         if "arquivo_processado" not in st.session_state or st.session_state.arquivo_processado != arquivo_excel.name:
             try:
-                # Coluna 'Número' corresponde às Notas Fiscais (Coluna F)
                 colunas_necessarias = ["Posição", "Número", "Remetente", "Volumes"]
                 df_excel = pd.read_excel(arquivo_excel, usecols=lambda col: col in colunas_necessarias)
                 
