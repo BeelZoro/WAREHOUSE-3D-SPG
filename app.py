@@ -31,11 +31,10 @@ ESTADO_ARQUIVO = "wms_estado.json"
 def carregar_estoque():
     if os.path.exists(ESTADO_ARQUIVO):
         try:
-            return pd.read_json(ESTADO_ARQUIVO, dtype={"cte": str})
+            return pd.read_json(ESTADO_ARQUIVO, dtype={"nf": str})
         except Exception:
             pass
     
-    # Se não houver arquivo salvo, gera a estrutura padrão vazia
     dados_iniciais = []
     niveis = [10, 20, 30]
     
@@ -58,26 +57,34 @@ def carregar_estoque():
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
                     "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": "Tratativa",
-                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": "", "volumes": 0
+                    "status": "Vazio", "etiqueta": "", "nf": "", "remetente": "", "volumes": 0
                 })
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
                     "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": "Tratativa",
-                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": "", "volumes": 0
+                    "status": "Vazio", "etiqueta": "", "nf": "", "remetente": "", "volumes": 0
                 })
         
         for idx, (pos_r, pos_l) in enumerate(lista_geral):
             col_idx = idx + offset_geral
             for nivel in niveis:
+                # Define setor Duracell (Nível 10, Rua A de 116 a 146, Rua B de 117 a 147)
+                zona = "Armazém"
+                if nivel == 10:
+                    if nome_rua == "A" and 116 <= pos_r <= 146:
+                        zona = "Duracell"
+                    elif nome_rua == "B" and 117 <= pos_r <= 147:
+                        zona = "Duracell"
+
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_r}-{nivel}", "rua": nome_rua, "pos_num": pos_r, "nivel": nivel,
-                    "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": "Armazém",
-                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": "", "volumes": 0
+                    "col_idx": col_idx, "side": "right", "z_pos": z_pos, "zona": zona,
+                    "status": "Vazio", "etiqueta": "", "nf": "", "remetente": "", "volumes": 0
                 })
                 dados_iniciais.append({
                     "id": f"R-{nome_rua}-{pos_l}-{nivel}", "rua": nome_rua, "pos_num": pos_l, "nivel": nivel,
-                    "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": "Armazém",
-                    "status": "Vazio", "etiqueta": "", "cte": "", "remetente": "", "volumes": 0
+                    "col_idx": col_idx, "side": "left", "z_pos": z_pos, "zona": zona,
+                    "status": "Vazio", "etiqueta": "", "nf": "", "remetente": "", "volumes": 0
                 })
 
     montar_rua("C", racks_c_trat, racks_c_geral, z_pos=-8.0, offset_geral=4)
@@ -105,12 +112,13 @@ total_pos = len(df)
 ocupados_total = len(df[df["status"] == "Ocupado"])
 taxa_ocupacao = (ocupados_total / total_pos * 100) if total_pos > 0 else 0
 ocupados_tratativa = len(df[(df["status"] == "Ocupado") & (df["zona"] == "Tratativa")])
+ocupados_duracell = len(df[(df["status"] == "Ocupado") & (df["zona"] == "Duracell")])
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Total de Posições", total_pos)
 m2.metric("Ocupação Geral", f"{taxa_ocupacao:.1f}%", f"{ocupados_total} paletes")
-m3.metric("Tratativa Ocupada", f"{ocupados_tratativa} paletes")
-m4.metric("Posições Livres", total_pos - ocupados_total)
+m3.metric("Duracell Ocupado", f"{ocupados_duracell} paletes")
+m4.metric("Tratativa Ocupada", f"{ocupados_tratativa} paletes")
 
 st.divider()
 
@@ -125,19 +133,20 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
     if arquivo_excel is not None:
         if "arquivo_processado" not in st.session_state or st.session_state.arquivo_processado != arquivo_excel.name:
             try:
-                colunas_necessarias = ["Posição", "Numero_cte", "Remetente", "Volumes"]
+                # Coluna 'Número' corresponde às Notas Fiscais (Coluna F)
+                colunas_necessarias = ["Posição", "Número", "Remetente", "Volumes"]
                 df_excel = pd.read_excel(arquivo_excel, usecols=lambda col: col in colunas_necessarias)
                 
                 st.session_state.estoque["status"] = "Vazio"
                 st.session_state.estoque["etiqueta"] = ""
-                st.session_state.estoque["cte"] = ""
+                st.session_state.estoque["nf"] = ""
                 st.session_state.estoque["remetente"] = ""
                 st.session_state.estoque["volumes"] = 0
                 
                 valid_ids = set(st.session_state.estoque["id"])
                 df_excel = df_excel[df_excel["Posição"].isin(valid_ids)].copy()
                 
-                def clean_cte(val):
+                def clean_nf(val):
                     if pd.isna(val): return ""
                     try:
                         f = float(val)
@@ -146,10 +155,10 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                         pass
                     return str(val).strip()
 
-                df_excel['clean_cte'] = df_excel['Numero_cte'].apply(clean_cte)
+                df_excel['clean_nf'] = df_excel['Número'].apply(clean_nf)
                 
                 df_agrupado = df_excel.groupby('Posição').agg({
-                    'clean_cte': lambda x: ', '.join(sorted(list(set([str(v) for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
+                    'clean_nf': lambda x: ', '.join(sorted(list(set([str(v) for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
                     'Remetente': lambda x: ', '.join(sorted(list(set([str(v).strip() for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
                     'Volumes': 'sum'
                 }).reset_index()
@@ -162,7 +171,7 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                         if len(idx_wms) > 0:
                             i = idx_wms[0]
                             st.session_state.estoque.at[i, "status"] = "Ocupado"
-                            st.session_state.estoque.at[i, "cte"] = str(row["clean_cte"])
+                            st.session_state.estoque.at[i, "nf"] = str(row["clean_nf"])
                             st.session_state.estoque.at[i, "remetente"] = str(row["Remetente"])
                             st.session_state.estoque.at[i, "volumes"] = int(row["Volumes"]) if pd.notna(row["Volumes"]) else 0
                             st.session_state.estoque.at[i, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
@@ -174,9 +183,7 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
             except Exception as e:
                 st.error(f"Erro ao processar a planilha: {e}")
 
-# SEÇÃO DE BACKUP DO ESTADO
 with st.sidebar.expander("💾 Backup e Restauração", expanded=False):
-    # Botão para baixar o estado atual em JSON
     json_bytes = st.session_state.estoque.to_json(orient="records", force_ascii=False).encode('utf-8')
     st.download_button(
         label="📥 Baixar Backup do Armazém",
@@ -186,11 +193,10 @@ with st.sidebar.expander("💾 Backup e Restauração", expanded=False):
         use_container_width=True
     )
     
-    # Uploader para restaurar um backup salvo anteriormente
     arquivo_backup = st.file_uploader("📤 Restaurar Backup (.json)", type=["json"])
     if arquivo_backup is not None:
         try:
-            df_restaurado = pd.read_json(arquivo_backup, dtype={"cte": str})
+            df_restaurado = pd.read_json(arquivo_backup, dtype={"nf": str})
             if "id" in df_restaurado.columns and "status" in df_restaurado.columns:
                 st.session_state.estoque = df_restaurado
                 salvar_estoque(df_restaurado)
@@ -219,13 +225,15 @@ st.sidebar.divider()
 st.sidebar.subheader(f"Endereço: {id_alvo}")
 if linha_atual["zona"] == "Tratativa":
     st.sidebar.error("🚨 ÁREA DE TRATATIVA")
+elif linha_atual["zona"] == "Duracell":
+    st.sidebar.warning("🟧 SETOR DURACELL")
 else:
     st.sidebar.success("✅ ARMAZÉM GERAL")
 
 with st.sidebar.form("form_alocacao"):
     novo_status = st.radio("Status:", ["Vazio", "Ocupado"], index=0 if linha_atual["status"] == "Vazio" else 1)
     nova_etiqueta = st.text_input("Etiqueta Unitizadora:", value=linha_atual["etiqueta"], placeholder="Ex: PAL-1234")
-    novo_cte = st.text_input("CTe:", value=linha_atual["cte"], placeholder="Ex: 987654")
+    nova_nf = st.text_input("Nota Fiscal (NF):", value=linha_atual["nf"], placeholder="Ex: 580333")
     novo_remetente = st.text_input("Remetente:", value=linha_atual["remetente"], placeholder="Nome do Cliente")
     novos_volumes = st.number_input("Volumes:", value=int(linha_atual["volumes"]), min_value=0, step=1)
     
@@ -235,45 +243,14 @@ with st.sidebar.form("form_alocacao"):
         st.session_state.estoque.at[idx_linha, "status"] = novo_status
         if novo_status == "Vazio":
             st.session_state.estoque.at[idx_linha, "etiqueta"] = ""
-            st.session_state.estoque.at[idx_linha, "cte"] = ""
+            st.session_state.estoque.at[idx_linha, "nf"] = ""
             st.session_state.estoque.at[idx_linha, "remetente"] = ""
             st.session_state.estoque.at[idx_linha, "volumes"] = 0
         else:
             st.session_state.estoque.at[idx_linha, "etiqueta"] = nova_etiqueta
-            st.session_state.estoque.at[idx_linha, "cte"] = novo_cte
+            st.session_state.estoque.at[idx_linha, "nf"] = nova_nf
             st.session_state.estoque.at[idx_linha, "remetente"] = novo_remetente
             st.session_state.estoque.at[idx_linha, "volumes"] = novos_volumes
-        
-        salvar_estoque(st.session_state.estoque)
-        st.rerun()
-
-st.sidebar.divider()
-
-with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=False):
-    if st.button("🎲 Gerar Dados Fictícios", use_container_width=True):
-        st.session_state.estoque["status"] = "Vazio"
-        st.session_state.estoque["etiqueta"] = ""
-        st.session_state.estoque["cte"] = ""
-        st.session_state.estoque["remetente"] = ""
-        st.session_state.estoque["volumes"] = 0
-        
-        for idx in st.session_state.estoque.index:
-            if random.random() < 0.25:
-                st.session_state.estoque.at[idx, "status"] = "Ocupado"
-                st.session_state.estoque.at[idx, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
-                st.session_state.estoque.at[idx, "cte"] = f"{random.randint(100000, 999999)}"
-                st.session_state.estoque.at[idx, "remetente"] = "Cliente Fictício Ltda"
-                st.session_state.estoque.at[idx, "volumes"] = random.randint(1, 15)
-        
-        salvar_estoque(st.session_state.estoque)
-        st.rerun()
-
-    if st.button("Esvaziar Armazém", use_container_width=True):
-        st.session_state.estoque["status"] = "Vazio"
-        st.session_state.estoque["etiqueta"] = ""
-        st.session_state.estoque["cte"] = ""
-        st.session_state.estoque["remetente"] = ""
-        st.session_state.estoque["volumes"] = 0
         
         salvar_estoque(st.session_state.estoque)
         st.rerun()
@@ -300,12 +277,12 @@ html_3d = f"""
         
         #legend {{
             position: absolute; bottom: 15px; left: 15px; background: rgba(255, 255, 255, 0.9);
-            border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; font-size: 12px;
-            display: flex; gap: 15px; align-items: center; backdrop-filter: blur(4px);
+            border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; font-size: 11px;
+            display: flex; gap: 12px; align-items: center; backdrop-filter: blur(4px);
             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); color: #374151; font-weight: 500;
         }}
         
-        .legend-item {{ display: flex; align-items: center; gap: 6px; }}
+        .legend-item {{ display: flex; align-items: center; gap: 5px; }}
         .legend-color {{ width: 12px; height: 12px; border-radius: 3px; }}
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -316,9 +293,9 @@ html_3d = f"""
     <div id="tooltip"></div>
     <div id="legend">
         <div class="legend-item"><div class="legend-color" style="background:#10b981; opacity:0.3; border:1px solid #10b981;"></div> Livre</div>
-        <div class="legend-item"><div class="legend-color" style="background:#f59e0b;"></div> Ocupado Geral</div>
-        <div class="legend-item"><div class="legend-color" style="background:#e11d48;"></div> Ocupado Tratativa</div>
-        <div class="legend-item"><div class="legend-color" style="background:#1e3a8a;"></div> Estrutura de Aço</div>
+        <div class="legend-item"><div class="legend-color" style="background:#f59e0b;"></div> Duracell</div>
+        <div class="legend-item"><div class="legend-color" style="background:#3b82f6;"></div> Ocupado Geral</div>
+        <div class="legend-item"><div class="legend-color" style="background:#e11d48;"></div> Tratativa</div>
     </div>
 
     <script>
@@ -389,10 +366,14 @@ html_3d = f"""
         const matMontanteTrat = new THREE.MeshStandardMaterial({{ color: 0x991b1b, metalness: 0.6, roughness: 0.3 }});
         const matLongarina = new THREE.MeshStandardMaterial({{ color: 0xd97706, metalness: 0.5, roughness: 0.4 }});
         const matPaleteMadeira = new THREE.MeshStandardMaterial({{ color: 0x854d0e, roughness: 0.85 }});
-        const matOcupadoGeral = new THREE.MeshStandardMaterial({{ color: 0xf59e0b, roughness: 0.4, metalness: 0.1 }});
+        
+        const matOcupadoGeral = new THREE.MeshStandardMaterial({{ color: 0x3b82f6, roughness: 0.4, metalness: 0.1 }});
         const matOcupadoTrat = new THREE.MeshStandardMaterial({{ color: 0xe11d48, roughness: 0.3, metalness: 0.2 }});
+        const matOcupadoDuracell = new THREE.MeshStandardMaterial({{ color: 0xf59e0b, roughness: 0.3, metalness: 0.2 }});
+        
         const matVazioGeral = new THREE.MeshBasicMaterial({{ color: 0x10b981, wireframe: true, transparent: true, opacity: 0.2 }});
         const matVazioTrat = new THREE.MeshBasicMaterial({{ color: 0xe11d48, wireframe: true, transparent: true, opacity: 0.3 }});
+        const matVazioDuracell = new THREE.MeshBasicMaterial({{ color: 0xf59e0b, wireframe: true, transparent: true, opacity: 0.3 }});
 
         const boxGeo = new THREE.BoxGeometry(1.05, 0.8, 1.1);
         const palletGeo = new THREE.BoxGeometry(1.15, 0.1, 1.18);
@@ -457,7 +438,10 @@ html_3d = f"""
                 palletMesh.receiveShadow = true;
                 group.add(palletMesh);
 
-                let matBox = item.zona === "Tratativa" ? matOcupadoTrat : matOcupadoGeral;
+                let matBox = matOcupadoGeral;
+                if (item.zona === "Tratativa") matBox = matOcupadoTrat;
+                else if (item.zona === "Duracell") matBox = matOcupadoDuracell;
+
                 const boxMesh = new THREE.Mesh(boxGeo, matBox);
                 boxMesh.castShadow = true;
                 boxMesh.receiveShadow = true;
@@ -465,7 +449,10 @@ html_3d = f"""
                 group.add(boxMesh);
                 objetosInterativos.push(boxMesh);
             }} else {{
-                let matEmpty = item.zona === "Tratativa" ? matVazioTrat : matVazioGeral;
+                let matEmpty = matVazioGeral;
+                if (item.zona === "Tratativa") matEmpty = matVazioTrat;
+                else if (item.zona === "Duracell") matEmpty = matVazioDuracell;
+
                 const emptyMesh = new THREE.Mesh(boxGeo, matEmpty);
                 emptyMesh.userData = item;
                 group.add(emptyMesh);
@@ -495,9 +482,12 @@ html_3d = f"""
                 tooltip.style.left = (event.clientX + 16) + 'px';
                 tooltip.style.top = (event.clientY + 16) + 'px';
 
-                let tagZona = d.zona === 'Tratativa' 
-                    ? '<div style="color:#e11d48; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">🚨 ZONA DE TRATATIVA</div>' 
-                    : '<div style="color:#059669; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">📦 ARMAZÉM GERAL</div>';
+                let tagZona = '<div style="color:#2563eb; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">📦 ARMAZÉM GERAL</div>';
+                if (d.zona === 'Tratativa') {{
+                    tagZona = '<div style="color:#e11d48; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">🚨 ZONA DE TRATATIVA</div>';
+                }} else if (d.zona === 'Duracell') {{
+                    tagZona = '<div style="color:#d97706; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">🟧 SETOR DURACELL</div>';
+                }}
 
                 let statusBadge = d.status === 'Ocupado'
                     ? '<span style="background:#fef3c7; color:#b45309; border:1px solid #fcd34d; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:11px;">OCUPADO</span>'
@@ -508,7 +498,7 @@ html_3d = f"""
                     <div style="font-size:15px; font-weight:bold; margin-bottom:6px; color:#111827;">Endereço: ${{d.id}}</div>
                     <div style="margin-bottom:4px;">Status: ${{statusBadge}}</div>
                     <div style="color:#4b5563; font-size:12px; margin-top:6px; background:#f3f4f6; padding:6px; border-radius:4px;">
-                        CTe(s): <span style="color:#111827; font-weight:500;">${{d.cte || '---'}}</span><br/>
+                        Nota(s) Fiscal(is): <span style="color:#111827; font-weight:500;">${{d.nf || '---'}}</span><br/>
                         Remetente(s): <span style="color:#111827; font-weight:500;">${{d.remetente || '---'}}</span><br/>
                         Total Volumes: <span style="color:#111827; font-weight:500;">${{d.volumes || 0}} un</span><br/>
                         Etiqueta: <span style="color:#111827; font-weight:500;">${{d.etiqueta || '---'}}</span>
@@ -543,7 +533,7 @@ components.html(html_3d, height=600)
 # ---------------------------------------------------------
 st.subheader("📋 Paletes Alocados")
 col_filtro, _ = st.columns([2, 2])
-filtro_zona = col_filtro.radio("Filtrar por Zona:", ["Todas", "Armazém", "Tratativa"], horizontal=True)
+filtro_zona = col_filtro.radio("Filtrar por Setor/Zona:", ["Todas", "Armazém", "Duracell", "Tratativa"], horizontal=True)
 
 df_exibir = df[df["status"] == "Ocupado"]
 if filtro_zona != "Todas":
@@ -552,4 +542,4 @@ if filtro_zona != "Todas":
 if df_exibir.empty:
     st.info("Nenhum palete alocado para o filtro selecionado.")
 else:
-    st.dataframe(df_exibir[["id", "rua", "pos_num", "nivel", "zona", "remetente", "cte", "volumes", "etiqueta"]], use_container_width=True)
+    st.dataframe(df_exibir[["id", "rua", "pos_num", "nivel", "zona", "remetente", "nf", "volumes", "etiqueta"]], use_container_width=True)
