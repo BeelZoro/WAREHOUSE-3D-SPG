@@ -128,7 +128,6 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                 colunas_necessarias = ["Posição", "Numero_cte", "Remetente", "Volumes"]
                 df_excel = pd.read_excel(arquivo_excel, usecols=lambda col: col in colunas_necessarias)
                 
-                # Limpa o estoque atual antes de preencher
                 st.session_state.estoque["status"] = "Vazio"
                 st.session_state.estoque["etiqueta"] = ""
                 st.session_state.estoque["cte"] = ""
@@ -136,8 +135,6 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                 st.session_state.estoque["volumes"] = 0
                 
                 valid_ids = set(st.session_state.estoque["id"])
-                
-                # Filtra apenas as posições cadastradas no WMS
                 df_excel = df_excel[df_excel["Posição"].isin(valid_ids)].copy()
                 
                 def clean_cte(val):
@@ -151,7 +148,6 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
 
                 df_excel['clean_cte'] = df_excel['Numero_cte'].apply(clean_cte)
                 
-                # Agrupa os dados por Posição
                 df_agrupado = df_excel.groupby('Posição').agg({
                     'clean_cte': lambda x: ', '.join(sorted(list(set([str(v) for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
                     'Remetente': lambda x: ', '.join(sorted(list(set([str(v).strip() for v in x.dropna() if str(v) != 'nan' and str(v) != ''])))),
@@ -159,28 +155,51 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                 }).reset_index()
                 
                 contador_atualizados = 0
-                
                 for _, row in df_agrupado.iterrows():
                     pos_excel = str(row["Posição"]).strip()
-                    cte_val = str(row["clean_cte"])
-                    rem_val = str(row["Remetente"])
-                    vol_val = int(row["Volumes"]) if pd.notna(row["Volumes"]) else 0
-                    
-                    idx_wms = st.session_state.estoque[st.session_state.estoque["id"] == pos_excel].index
-                    if len(idx_wms) > 0:
-                        i = idx_wms[0]
-                        st.session_state.estoque.at[i, "status"] = "Ocupado"
-                        st.session_state.estoque.at[i, "cte"] = cte_val
-                        st.session_state.estoque.at[i, "remetente"] = rem_val
-                        st.session_state.estoque.at[i, "volumes"] = vol_val
-                        st.session_state.estoque.at[i, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
-                        contador_atualizados += 1
+                    if pos_excel in valid_ids:
+                        idx_wms = st.session_state.estoque[st.session_state.estoque["id"] == pos_excel].index
+                        if len(idx_wms) > 0:
+                            i = idx_wms[0]
+                            st.session_state.estoque.at[i, "status"] = "Ocupado"
+                            st.session_state.estoque.at[i, "cte"] = str(row["clean_cte"])
+                            st.session_state.estoque.at[i, "remetente"] = str(row["Remetente"])
+                            st.session_state.estoque.at[i, "volumes"] = int(row["Volumes"]) if pd.notna(row["Volumes"]) else 0
+                            st.session_state.estoque.at[i, "etiqueta"] = f"PAL-{random.randint(1000, 9999)}"
+                            contador_atualizados += 1
                 
                 salvar_estoque(st.session_state.estoque)
                 st.session_state.arquivo_processado = arquivo_excel.name
-                st.success(f"Relatório importado com sucesso! {contador_atualizados} posições mapeadas.")
+                st.success(f"Relatório importado! {contador_atualizados} posições mapeadas.")
             except Exception as e:
                 st.error(f"Erro ao processar a planilha: {e}")
+
+# SEÇÃO DE BACKUP DO ESTADO
+with st.sidebar.expander("💾 Backup e Restauração", expanded=False):
+    # Botão para baixar o estado atual em JSON
+    json_bytes = st.session_state.estoque.to_json(orient="records", force_ascii=False).encode('utf-8')
+    st.download_button(
+        label="📥 Baixar Backup do Armazém",
+        data=json_bytes,
+        file_name="wms_backup.json",
+        mime="application/json",
+        use_container_width=True
+    )
+    
+    # Uploader para restaurar um backup salvo anteriormente
+    arquivo_backup = st.file_uploader("📤 Restaurar Backup (.json)", type=["json"])
+    if arquivo_backup is not None:
+        try:
+            df_restaurado = pd.read_json(arquivo_backup, dtype={"cte": str})
+            if "id" in df_restaurado.columns and "status" in df_restaurado.columns:
+                st.session_state.estoque = df_restaurado
+                salvar_estoque(df_restaurado)
+                st.success("Armazém restaurado com sucesso!")
+                st.rerun()
+            else:
+                st.error("Arquivo de backup inválido.")
+        except Exception as e:
+            st.error(f"Erro ao restaurar backup: {e}")
 
 st.sidebar.divider()
 st.sidebar.markdown("### Alocação Manual")
@@ -249,7 +268,7 @@ with st.sidebar.expander("🛠️ Ferramentas de Apresentação", expanded=False
         salvar_estoque(st.session_state.estoque)
         st.rerun()
 
-    if st.button("🧹 Esvaziar Armazém", use_container_width=True):
+    if st.button("Esvaziar Armazém", use_container_width=True):
         st.session_state.estoque["status"] = "Vazio"
         st.session_state.estoque["etiqueta"] = ""
         st.session_state.estoque["cte"] = ""
