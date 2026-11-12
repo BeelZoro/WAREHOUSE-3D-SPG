@@ -43,6 +43,14 @@ def carregar_estoque():
             for col, dtype in colunas_obrigatorias.items():
                 if col not in df.columns:
                     df[col] = "" if dtype == str else 0
+            
+            # Garante que as posições da Duracell estejam sempre com a zona correta
+            for idx, row in df.iterrows():
+                if row["nivel"] == 10:
+                    if row["rua"] == "A" and 116 <= row["pos_num"] <= 146:
+                        df.at[idx, "zona"] = "Duracell"
+                    elif row["rua"] == "B" and 117 <= row["pos_num"] <= 147:
+                        df.at[idx, "zona"] = "Duracell"
             return df
         except Exception:
             pass
@@ -80,7 +88,6 @@ def carregar_estoque():
         for idx, (pos_r, pos_l) in enumerate(lista_geral):
             col_idx = idx + offset_geral
             for nivel in niveis:
-                # Tudo é Armazém Geral, mas identificamos a zona Duracell para coloração específica
                 zona = "Armazém"
                 if nivel == 10:
                     if nome_rua == "A" and 116 <= pos_r <= 146:
@@ -149,7 +156,7 @@ with st.sidebar.expander("📂 Importar Relatório Excel", expanded=True):
                 colunas_necessarias = ["Posição", "Número", "Remetente", "Volumes"]
                 df_excel = pd.read_excel(arquivo_excel, usecols=lambda col: col in colunas_necessarias)
                 
-                # Reseta apenas o status de ocupação mantendo a estrutura de zonas
+                # Reseta apenas o status mantendo as zonas intactas
                 st.session_state.estoque["status"] = "Vazio"
                 st.session_state.estoque["etiqueta"] = ""
                 st.session_state.estoque["nf"] = ""
@@ -211,6 +218,13 @@ with st.sidebar.expander("💾 Backup e Restauração", expanded=False):
         try:
             df_restaurado = pd.read_json(arquivo_backup, dtype={"nf": str})
             if "id" in df_restaurado.columns and "status" in df_restaurado.columns:
+                # Re-aplica zonas Duracell ao restaurar
+                for idx, row in df_restaurado.iterrows():
+                    if row["nivel"] == 10:
+                        if row["rua"] == "A" and 116 <= row["pos_num"] <= 146:
+                            df_restaurado.at[idx, "zona"] = "Duracell"
+                        elif row["rua"] == "B" and 117 <= row["pos_num"] <= 147:
+                            df_restaurado.at[idx, "zona"] = "Duracell"
                 st.session_state.estoque = df_restaurado
                 salvar_estoque(df_restaurado)
                 st.success("Armazém restaurado com sucesso!")
@@ -239,7 +253,7 @@ st.sidebar.subheader(f"Endereço: {id_alvo}")
 if linha_atual["zona"] == "Tratativa":
     st.sidebar.error("🚨 ÁREA DE TRATATIVA")
 elif linha_atual["zona"] == "Duracell":
-    st.sidebar.warning("🟧 SETOR DURACELL (ARMÁZÉM)")
+    st.sidebar.warning("🟫 SETOR DURACELL (MARROM)")
 else:
     st.sidebar.success("✅ ARMAZÉM GERAL")
 
@@ -306,7 +320,7 @@ html_3d = f"""
     <div id="tooltip"></div>
     <div id="legend">
         <div class="legend-item"><div class="legend-color" style="background:#10b981; opacity:0.3; border:1px solid #10b981;"></div> Livre</div>
-        <div class="legend-item"><div class="legend-color" style="background:#f59e0b;"></div> Duracell (Laranja)</div>
+        <div class="legend-item"><div class="legend-color" style="background:#854d0e;"></div> Duracell (Marrom)</div>
         <div class="legend-item"><div class="legend-color" style="background:#fbbf24;"></div> Armazém Geral (Amarelo)</div>
         <div class="legend-item"><div class="legend-color" style="background:#e11d48;"></div> Tratativa</div>
     </div>
@@ -380,15 +394,15 @@ html_3d = f"""
         const matLongarina = new THREE.MeshStandardMaterial({{ color: 0xd97706, metalness: 0.5, roughness: 0.4 }});
         const matPaleteMadeira = new THREE.MeshStandardMaterial({{ color: 0x854d0e, roughness: 0.85 }});
         
-        // Cores dos paletes ocupados (Amarelo para Armazém Geral, Laranja para Duracell, Vermelho para Tratativa)
+        // Cores dos paletes ocupados (Amarelo para Geral, Marrom para Duracell, Vermelho para Tratativa)
         const matOcupadoGeral = new THREE.MeshStandardMaterial({{ color: 0xfbbf24, roughness: 0.4, metalness: 0.1 }});
         const matOcupadoTrat = new THREE.MeshStandardMaterial({{ color: 0xe11d48, roughness: 0.3, metalness: 0.2 }});
-        const matOcupadoDuracell = new THREE.MeshStandardMaterial({{ color: 0xf59e0b, roughness: 0.3, metalness: 0.2 }});
+        const matOcupadoDuracell = new THREE.MeshStandardMaterial({{ color: 0x854d0e, roughness: 0.4, metalness: 0.2 }});
         
-        // Cores dos wireframes vazios
+        // Cores dos wireframes vazios (Marrom para Duracell)
         const matVazioGeral = new THREE.MeshBasicMaterial({{ color: 0x10b981, wireframe: true, transparent: true, opacity: 0.2 }});
         const matVazioTrat = new THREE.MeshBasicMaterial({{ color: 0xe11d48, wireframe: true, transparent: true, opacity: 0.3 }});
-        const matVazioDuracell = new THREE.MeshBasicMaterial({{ color: 0xf59e0b, wireframe: true, transparent: true, opacity: 0.3 }});
+        const matVazioDuracell = new THREE.MeshBasicMaterial({{ color: 0x854d0e, wireframe: true, transparent: true, opacity: 0.4 }});
 
         const boxGeo = new THREE.BoxGeometry(1.05, 0.8, 1.1);
         const palletGeo = new THREE.BoxGeometry(1.15, 0.1, 1.18);
@@ -501,7 +515,7 @@ html_3d = f"""
                 if (d.zona === 'Tratativa') {{
                     tagZona = '<div style="color:#e11d48; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">🚨 ZONA DE TRATATIVA</div>';
                 }} else if (d.zona === 'Duracell') {{
-                    tagZona = '<div style="color:#d97706; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">🟧 SETOR DURACELL</div>';
+                    tagZona = '<div style="color:#854d0e; font-weight:bold; margin-bottom:4px; font-size:11px; letter-spacing:1px;">🟫 SETOR DURACELL</div>';
                 }}
 
                 let statusBadge = d.status === 'Ocupado'
@@ -548,12 +562,10 @@ components.html(html_3d, height=600)
 # ---------------------------------------------------------
 st.subheader("📋 Paletes Alocados")
 col_filtro, _ = st.columns([2, 2])
-# Filtro limpo sem "Duracell" separado
 filtro_zona = col_filtro.radio("Filtrar por Zona:", ["Todas", "Armazém", "Tratativa"], horizontal=True)
 
 df_exibir = df[df["status"] == "Ocupado"]
 if filtro_zona == "Armazém":
-    # Agrupa Armazém Geral e Duracell sob a aba Armazém
     df_exibir = df_exibir[df_exibir["zona"].isin(["Armazém", "Duracell"])]
 elif filtro_zona == "Tratativa":
     df_exibir = df_exibir[df_exibir["zona"] == "Tratativa"]
